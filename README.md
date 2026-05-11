@@ -7,8 +7,7 @@ My personal [pi coding agent](https://github.com/earendil-works/pi-mono) setup â
 | Package | Description |
 |---------|-------------|
 | [git-conventions](./packages/git-conventions) | AI-driven git with conventional commits, prefixed branches, safe merges, auto PRs, and smart .gitignore |
-
-More coming as I build them.
+| [credential-guard](./packages/credential-guard) | Blocks AI agent from reading credential files (.env, private keys, secrets) and dangerous bash commands |
 
 ## Install everything
 
@@ -20,6 +19,7 @@ pi install github.com/praffiii/my-pi-setup
 
 ```bash
 pi install github.com/praffiii/my-pi-setup/packages/git-conventions
+pi install github.com/praffiii/my-pi-setup/packages/credential-guard
 ```
 
 ## License
