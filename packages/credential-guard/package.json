@@ -1,0 +1,20 @@
+{
+  "name": "pi-credential-guard",
+  "version": "1.0.0",
+  "description": "Blocks AI agent from reading credential files (.env, *.pem, private keys, etc.) and running dangerous bash commands (env, printenv, echo $SECRET). Two-tier: hard block for unambiguous secrets, permission prompt for borderline configs.",
+  "license": "MIT",
+  "keywords": [
+    "pi-coding-agent",
+    "credential",
+    "security",
+    "extension"
+  ],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/praffiii/my-pi-setup",
+    "directory": "packages/credential-guard"
+  }
+}
