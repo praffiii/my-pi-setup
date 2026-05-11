@@ -22,12 +22,6 @@ pi install github.com/praffiii/my-pi-setup
 pi install github.com/praffiii/my-pi-setup/packages/git-conventions
 ```
 
-## Why this exists
-
-I got tired of AI agents writing commit messages like `"update files"` and pushing directly to `main`. So I built tools that enforce real conventions — the kind you'd see in a serious engineering team.
-
-Everything here is designed to be **agent-first**: the AI calls tools, the tools enforce the rules, and I stay in control.
-
 ## License
 
 MIT

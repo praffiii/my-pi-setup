@@ -4,7 +4,9 @@ AI-driven git operations for [pi coding agent](https://github.com/earendil-works
 
 ## Why?
 
-AI agents are terrible at naming conventions. They commit `"update files"` on `main`, create branches like `"fix-thing"`, and never write proper PR descriptions. This extension fixes that.
+I got tired of AI agents writing commit messages like `"update files"` and pushing directly to `main`. So I built tools that enforce real conventions — the kind you'd see in a serious engineering team.
+
+Everything here is designed to be **agent-first**: the AI calls tools, the tools enforce the rules, and I stay in control.
 
 Every git operation goes through tools that **enforce**:
 - ✅ Conventional commits (`feat(auth): add login form`)
