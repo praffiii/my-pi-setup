@@ -289,6 +289,20 @@ function getIgnorePatterns(cwd: string): string[] {
 
 export default function (pi: ExtensionAPI) {
 
+  // ------------------------------------------------------------------
+  // Guard: only use git tools when the user explicitly asks
+  // ------------------------------------------------------------------
+  pi.on("before_agent_start", async (event) => {
+    return {
+      systemPrompt: event.systemPrompt +
+        "\nGit tools (git_init, git_status, git_diff, git_add, git_commit, " +
+        "git_branch, git_push, git_pull, git_merge, git_create_pr, git_ignore) " +
+        "are available but must NOT be used unless the user explicitly asks you " +
+        "to commit, push, branch, or perform any git operation. Never run git " +
+        "commands on your own initiative.\n",
+    };
+  });
+
   // ================================================================
   // git_init — Initialize a repository
   // ================================================================
