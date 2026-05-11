@@ -14,6 +14,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/praffiramadhani/pi-git-conventions"
+    "url": "https://github.com/praffiii/my-pi-setup",
+    "directory": "packages/git-conventions"
   }
 }

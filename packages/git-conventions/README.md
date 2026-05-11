@@ -16,7 +16,7 @@ Every git operation goes through tools that **enforce**:
 ## Install
 
 ```bash
-pi install github.com/praffiramadhani/pi-git-conventions
+pi install github.com/praffiii/my-pi-setup
 ```
 
 Or manually:
