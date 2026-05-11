@@ -1,0 +1,19 @@
+{
+  "name": "pi-git-conventions",
+  "version": "1.0.0",
+  "description": "AI-driven git operations with conventional commits, prefixed branches, safe push/pull/merge, auto PRs, and smart .gitignore — all enforced for you by the agent.",
+  "license": "MIT",
+  "keywords": [
+    "pi-coding-agent",
+    "git",
+    "conventional-commits",
+    "extension"
+  ],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/praffiramadhani/pi-git-conventions"
+  }
+}
