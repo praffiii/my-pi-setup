@@ -8,6 +8,7 @@ My personal [pi coding agent](https://github.com/earendil-works/pi-mono) setup â
 |---------|-------------|
 | [git-conventions](./packages/git-conventions) | AI-driven git with conventional commits, prefixed branches, safe merges, auto PRs, and smart .gitignore |
 | [credential-guard](./packages/credential-guard) | Blocks AI agent from reading credential files (.env, private keys, secrets) and dangerous bash commands |
+| [github-theme](./packages/github-theme) | GitHub Dark Default theme for the pi TUI |
 
 ## Install everything
 
@@ -20,6 +21,7 @@ pi install github.com/praffiii/my-pi-setup
 ```bash
 pi install github.com/praffiii/my-pi-setup/packages/git-conventions
 pi install github.com/praffiii/my-pi-setup/packages/credential-guard
+pi install github.com/praffiii/my-pi-setup/packages/github-theme
 ```
 
 ## License
