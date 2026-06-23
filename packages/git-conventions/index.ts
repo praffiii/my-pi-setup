@@ -42,6 +42,9 @@ const NOISE_WORDS = new Set([
   "them", "into", "over", "under", "after", "before", "while",
   "during", "about", "would", "could", "should", "there", "their",
   "which", "other", "being", "much", "such", "many", "does",
+  // Git metadata words that leak from diff headers
+  "diff", "git", "index", "blob", "hunk", "mode", "file", "files",
+  "binary", "similarity", "rename", "copy", "patch", "patches",
 ]);
 
 // ============================================================================
@@ -88,6 +91,113 @@ async function hasChanges(pi: ExtensionAPI, cwd: string): Promise<boolean> {
 // Convention Engine — Diff Analysis
 // ============================================================================
 
+/**
+ * Strip diff metadata lines (headers, hunk markers, index lines) from raw diff.
+ * Returns only the actual content lines (additions and deletions).
+ */
+function stripDiffMetadata(diff: string): { addedLines: string; allContentLines: string } {
+  const lines = diff.split("\n");
+  const added: string[] = [];
+  const content: string[] = [];
+
+  for (const line of lines) {
+    // Skip diff headers
+    if (
+      line.startsWith("diff --git") ||
+      line.startsWith("index ") ||
+      line.startsWith("--- ") ||
+      line.startsWith("+++ ") ||
+      line.startsWith("@@") ||
+      line.startsWith("similarity ") ||
+      line.startsWith("rename ") ||
+      line.startsWith("copy ") ||
+      line.startsWith("Binary files") ||
+      line.startsWith("new file mode") ||
+      line.startsWith("deleted file mode") ||
+      line.startsWith("old mode") ||
+      line.startsWith("new mode")
+    ) {
+      continue;
+    }
+
+    // Actual content lines
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      added.push(line.slice(1));
+      content.push(line.slice(1));
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      content.push(line.slice(1));
+    }
+  }
+
+  return { addedLines: added.join("\n"), allContentLines: content.join("\n") };
+}
+
+/**
+ * Parse diff headers to extract file operations: added, deleted, renamed, modified.
+ */
+interface FileOperations {
+  renamed: Array<{ from: string; to: string }>;
+  added: string[];
+  deleted: string[];
+  modified: string[];
+}
+
+function parseFileOperations(diff: string, files: string[]): FileOperations {
+  const ops: FileOperations = { renamed: [], added: [], deleted: [], modified: [] };
+  const lines = diff.split("\n");
+
+  let currentFrom = "";
+  let currentTo = "";
+  let isNewFile = false;
+  let isDeletedFile = false;
+
+  for (const line of lines) {
+    if (line.startsWith("diff --git")) {
+      // Save previous file if it was new/deleted
+      if (isNewFile && currentTo) ops.added.push(currentTo);
+      else if (isDeletedFile && currentFrom) ops.deleted.push(currentFrom);
+      // Reset
+      currentFrom = "";
+      currentTo = "";
+      isNewFile = false;
+      isDeletedFile = false;
+      // Parse a/X b/Y
+      const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+      if (match) {
+        currentFrom = match[1];
+        currentTo = match[2];
+      }
+    } else if (line.startsWith("new file mode")) {
+      isNewFile = true;
+    } else if (line.startsWith("deleted file mode")) {
+      isDeletedFile = true;
+    } else if (line.startsWith("rename from ")) {
+      currentFrom = line.replace("rename from ", "");
+    } else if (line.startsWith("rename to ")) {
+      currentTo = line.replace("rename to ", "");
+      ops.renamed.push({ from: currentFrom, to: currentTo });
+    }
+  }
+
+  // Handle last file
+  if (isNewFile && currentTo) ops.added.push(currentTo);
+  else if (isDeletedFile && currentFrom) ops.deleted.push(currentFrom);
+
+  // Anything not renamed/added/deleted is modified
+  const specialFiles = new Set([
+    ...ops.renamed.flatMap((r) => [r.from, r.to]),
+    ...ops.added,
+    ...ops.deleted,
+  ]);
+  for (const f of files) {
+    if (!specialFiles.has(f)) {
+      ops.modified.push(f);
+    }
+  }
+
+  return ops;
+}
+
 function detectType(diff: string, files: string[]): ConventionalType {
   if (files.length === 0) return "chore";
 
@@ -118,20 +228,32 @@ function detectType(diff: string, files: string[]): ConventionalType {
   const allConfig = files.every((f) => configFiles.has(path.basename(f)) || f.startsWith("."));
   if (allConfig) return "chore";
 
-  const lower = diff.toLowerCase();
+  // Only search ACTUAL code changes (added lines), not diff metadata
+  const { addedLines } = stripDiffMetadata(diff);
+  const lower = addedLines.toLowerCase();
   if (/(\bfix\b|\bbug\b|\bregression\b|\bhotfix\b|\bpatch\b|\bcrash\b)/.test(lower)) return "fix";
-  if (/(\brefactor\b|\brewrite\b|\breorganize\b|\brename\b|\bextract\b|\bcleanup\b|\bsimplify\b)/.test(lower)) return "refactor";
+  if (/(\brefactor\b|\brewrite\b|\breorganize\b|\bextract\b|\bcleanup\b|\bsimplify\b)/.test(lower)) return "refactor";
   if (/(\bperformance\b|\boptimize\b|\bspeed\b|\bcache\b|\bperf\b|\bfaster\b)/.test(lower)) return "perf";
   if (/(\bformat\b|\blint\b|\bstyle\b|\bprettier\b|\beslint\b|\bindent)/.test(lower)) return "style";
   if (/(\bbuild\b|\bcompile\b|\bbundle\b|\bwebpack\b|\bvite\b|\broolup\b)/.test(lower)) return "build";
 
-  const additions = (diff.match(/^\+/gm) || []).length;
-  const deletions = (diff.match(/^-/gm) || []).length;
+  // Analyze file operations for better type detection
+  const ops = parseFileOperations(diff, files);
 
-  if (additions > deletions * 2) return "feat";
-  if (deletions > additions * 1.5) return "chore";
+  // Pure renames/moves → refactor
+  if (ops.renamed.length > 0 && ops.added.length === 0 && ops.modified.length === 0) return "refactor";
 
-  return "feat";
+  // New files added → feat
+  if (ops.added.length > 0 && ops.deleted.length === 0) return "feat";
+
+  // Only deletions → chore
+  if (ops.deleted.length > 0 && ops.added.length === 0 && ops.modified.length === 0) return "chore";
+
+  // Mixed changes with more deletions than additions → chore
+  if (ops.deleted.length > ops.added.length) return "chore";
+
+  // Default: if new files added, it's a feature; otherwise chore
+  return ops.added.length > 0 ? "feat" : "chore";
 }
 
 function detectScope(files: string[], cwd: string): string | null {
@@ -168,37 +290,141 @@ function detectScope(files: string[], cwd: string): string | null {
 }
 
 function generateMessage(type: ConventionalType, scope: string | null, diff: string, files: string[]): string {
-  // Extract meaningful words from the diff content
-  const words = diff
-    .replace(/^[+\-]{1,3}\s*/gm, "") // strip diff markers
-    .replace(/[^a-zA-Z\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 3)
-    .filter((w) => !NOISE_WORDS.has(w.toLowerCase()))
-    .map((w) => w.toLowerCase());
+  // Parse file operations for structural analysis
+  const ops = parseFileOperations(diff, files);
 
-  const uniqueWords = [...new Set(words)].slice(0, 5);
+  // Helper to humanize a filename/path into readable words
+  const humanize = (filePath: string): string => {
+    const base = path.basename(filePath, path.extname(filePath));
+    return base.replace(/[-_.]/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim().toLowerCase();
+  };
 
-  // Try to build a meaningful message from file analysis
+  // Helper to get a readable directory name from a path
+  const dirName = (filePath: string): string => {
+    const parts = filePath.split("/");
+    const meaningful = parts[0] === "src" || parts[0] === "lib" || parts[0] === "app"
+      ? parts[1] : parts[0];
+    return meaningful ? meaningful.replace(/[-_.]/g, " ").toLowerCase() : "";
+  };
+
+  // Build verb based on type — use natural verbs, not the type name
+  const verbForType: Record<ConventionalType, string> = {
+    feat: "add",
+    fix: "fix",
+    chore: "update",
+    docs: "update",
+    refactor: "refactor",
+    test: "update",
+    style: "update",
+    ci: "update",
+    perf: "optimize",
+    build: "update",
+  };
+  const verb = verbForType[type];
+
+  // Strategy 1: Pure renames/moves — describe the move
+  if (ops.renamed.length > 0 && ops.added.length === 0 && ops.deleted.length === 0 && ops.modified.length <= 2) {
+    if (ops.renamed.length === 1) {
+      const r = ops.renamed[0];
+      const name = humanize(r.to);
+      const targetDir = dirName(r.to);
+      if (targetDir && dirName(r.from) !== targetDir) {
+        return `move ${name} to ${targetDir}`;
+      }
+      return `rename ${humanize(r.from)} to ${name}`;
+    }
+    const targetDir = dirName(ops.renamed[0].to);
+    return `move ${ops.renamed.length} files to ${targetDir || "new location"}`;
+  }
+
+  // Strategy 2: Single file change — describe by file purpose
   if (files.length === 1) {
-    const file = path.basename(files[0], path.extname(files[0]));
-    const fileWords = file.replace(/[-_.]/g, " ").trim();
-    const verb = type === "feat" ? "add" : type;
-    return `${verb} ${fileWords.toLowerCase()}`;
+    const file = files[0];
+    const base = path.basename(file);
+
+    // Config files get specific messages
+    if (base === "package.json") return `${verb} dependencies`;
+    if (base === "pnpm-lock.yaml" || base === "yarn.lock" || base === "package-lock.json") return `${verb} lockfile`;
+    if (base === ".gitignore") return `${verb} gitignore rules`;
+    if (base === "tsconfig.json") return `${verb} typescript config`;
+    if (base.endsWith(".test.ts") || base.endsWith(".test.tsx") || base.endsWith(".spec.ts")) {
+      return `${verb} tests for ${humanize(file)}`;
+    }
+
+    const name = humanize(file);
+    if (ops.added.includes(file)) return `add ${name}`;
+    if (ops.deleted.includes(file)) return `remove ${name}`;
+    return `${verb} ${name}`;
   }
 
-  if (files.length <= 3 && uniqueWords.length >= 2) {
-    const verb = type === "feat" ? "add" : type;
-    return `${verb} ${uniqueWords.slice(0, Math.min(3, uniqueWords.length)).join(" ")}`;
+  // Strategy 3: Multiple files — describe the pattern of changes
+  const parts: string[] = [];
+
+  // Describe renames
+  if (ops.renamed.length > 0) {
+    const targetDir = dirName(ops.renamed[0].to);
+    parts.push(`move ${ops.renamed.length > 1 ? `${ops.renamed.length} files` : humanize(ops.renamed[0].to)} to ${targetDir || "new location"}`);
   }
 
-  if (uniqueWords.length >= 2) {
-    const verb = type === "feat" ? "add" : type;
-    return `${verb} ${uniqueWords.slice(0, 4).join(" ")}`;
+  // Describe new files
+  if (ops.added.length > 0) {
+    if (ops.added.length === 1) {
+      parts.push(`add ${humanize(ops.added[0])}`);
+    } else {
+      const dirs = [...new Set(ops.added.map(dirName))].filter(Boolean);
+      parts.push(`add ${ops.added.length} files${dirs.length === 1 ? ` in ${dirs[0]}` : ""}`);
+    }
   }
 
-  // Fallback: describe by file count and type
-  const verb = type === "feat" ? "add changes to" : type;
+  // Describe deletions
+  if (ops.deleted.length > 0) {
+    if (ops.deleted.length === 1) {
+      parts.push(`remove ${humanize(ops.deleted[0])}`);
+    } else {
+      parts.push(`remove ${ops.deleted.length} files`);
+    }
+  }
+
+  // Describe modified files by category
+  if (ops.modified.length > 0 && parts.length === 0) {
+    const configModified = ops.modified.filter((f) => {
+      const base = path.basename(f);
+      return ["package.json", "pnpm-lock.yaml", "yarn.lock", "package-lock.json", "tsconfig.json"].includes(base);
+    });
+    const codeModified = ops.modified.filter((f) => !configModified.includes(f));
+
+    if (configModified.length > 0 && codeModified.length === 0) {
+      return `${verb} dependencies and lockfile`;
+    }
+
+    if (codeModified.length === 1) {
+      parts.push(`${verb} ${humanize(codeModified[0])}`);
+    } else if (codeModified.length > 1) {
+      const dirs = [...new Set(codeModified.map(dirName))].filter(Boolean);
+      if (dirs.length === 1) {
+        parts.push(`${verb} ${codeModified.length} files in ${dirs[0]}`);
+      } else {
+        // Try to describe what they have in common
+        const extensions = [...new Set(codeModified.map((f) => path.extname(f)))];
+        if (extensions.length === 1) {
+          const ext = extensions[0].replace(".", "");
+          parts.push(`${verb} ${codeModified.length} ${ext} files`);
+        } else {
+          parts.push(`${verb} ${codeModified.length} files`);
+        }
+      }
+    }
+
+    if (configModified.length > 0 && codeModified.length > 0) {
+      parts.push(`update dependencies`);
+    }
+  }
+
+  if (parts.length > 0) {
+    return parts.join(", ");
+  }
+
+  // Fallback: describe by file count
   const count = files.length;
   return `${verb} ${count} file${count > 1 ? "s" : ""}`;
 }
